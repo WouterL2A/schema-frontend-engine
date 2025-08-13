@@ -3,17 +3,21 @@ import Form from '@rjsf/mui';
 import { customizeValidator } from '@rjsf/validator-ajv8';
 import api from '../api';
 import schemaV2 from './schema_v2.json';
+import RefSelect from './widgets/RefSelect';
 
 import {
   Alert,
   AlertTitle,
-  Box,
-  Paper,
-  Snackbar,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
   Typography,
 } from '@mui/material';
 
-// Validator: draft-07 + uuid format (tolerant)
+import { guessLabelKey } from '../utils/refData';
+
 const validator = customizeValidator({
   ajvOptionsOverrides: { allErrors: true, strict: false },
   formats: {
@@ -21,7 +25,8 @@ const validator = customizeValidator({
   }
 });
 
-// ---------------- helpers ----------------
+// Hide the internal RJSF submit button (we use the dialog's Save)
+const templates = { ButtonTemplates: { SubmitButton: () => null } };
 
 function removeFromRequired(schemaObj, fields = []) {
   const clone = JSON.parse(JSON.stringify(schemaObj));
@@ -44,15 +49,27 @@ function buildInitialAuditValues(entitySchema) {
   return data;
 }
 
-function buildUiSchema(entitySchema, role) {
+function buildOrder(props) {
+  if (!props) return undefined;
+  const keys = Object.keys(props);
+  const first = ['name', 'email', 'role', 'roles'];
+  const last = ['created_at', 'issued_at', 'expires_at', 'updated_at', 'id'];
+  const middle = keys.filter((k) => !first.includes(k) && !last.includes(k));
+  return [...first.filter((k) => keys.includes(k)), ...middle, ...last.filter((k) => keys.includes(k))];
+}
+
+/** Build uiSchema: enums, widgets, FK dropdowns, audit field behavior */
+function buildUiSchema(entitySchema, role, allDefs) {
   if (!entitySchema?.properties) return {};
   const ui = {};
+  const props = entitySchema.properties;
   const toLabel = (v) => String(v).charAt(0).toUpperCase() + String(v).slice(1);
 
-  for (const [field, prop] of Object.entries(entitySchema.properties)) {
+  for (const [field, prop] of Object.entries(props)) {
     const xui = prop['x-ui'] || {};
     const entry = (ui[field] = ui[field] || {});
 
+    // Hidden rules
     if (xui.hidden === true) {
       entry['ui:widget'] = 'hidden';
       continue;
@@ -62,59 +79,84 @@ function buildUiSchema(entitySchema, role) {
       continue;
     }
 
-    if (typeof xui.widget === 'string') {
-      entry['ui:widget'] = xui.widget;
-    } else if (/password/i.test(field)) {
-      entry['ui:widget'] = 'password';
+    // FK detection (refTable/refColumn or $ref)
+    if (prop.refTable || prop.$ref) {
+      const table =
+        prop.refTable ||
+        (typeof prop.$ref === 'string' && prop.$ref.includes('#/definitions/')
+          ? prop.$ref.split('#/definitions/')[1].split('/')[0]
+          : undefined);
+
+      if (table) {
+        const valueKey = prop.refColumn || 'id';
+        const labelKey = guessLabelKey(allDefs, table);
+        entry['ui:widget'] = 'RefSelect';
+        entry['ui:options'] = {
+          ...(entry['ui:options'] || {}),
+          ref: { table, value: valueKey, label: labelKey },
+        };
+      }
+    }
+
+    if (!entry['ui:widget']) {
+      if (typeof xui.widget === 'string') {
+        entry['ui:widget'] = xui.widget;
+      } else if (/password/i.test(field)) {
+        entry['ui:widget'] = 'password';
+      }
     }
 
     if (xui.options && typeof xui.options === 'object') {
       entry['ui:options'] = { ...(entry['ui:options'] || {}), ...xui.options };
     }
 
-    if (prop.type === 'array' && prop.items && Array.isArray(prop.items.enum)) {
-      entry['ui:widget'] = entry['ui:widget'] || 'checkboxes';
-      entry['ui:options'] = {
-        ...(entry['ui:options'] || {}),
-        enumOptions: prop.items.enum.map((v) => ({ value: v, label: toLabel(v) })),
-      };
-    } else if (Array.isArray(prop.enum)) {
-      entry['ui:widget'] = entry['ui:widget'] || 'select';
-      entry['ui:options'] = {
-        ...(entry['ui:options'] || {}),
-        enumOptions: prop.enum.map((v) => ({ value: v, label: toLabel(v) })),
-      };
-    }
-
-    if (prop.readOnly === true && entry['ui:widget'] !== 'hidden') {
-      entry['ui:widget'] = 'hidden';
+    if (!entry['ui:widget']) {
+      if (prop.type === 'array' && prop.items && Array.isArray(prop.items.enum)) {
+        entry['ui:widget'] = 'checkboxes';
+        entry['ui:options'] = {
+          ...(entry['ui:options'] || {}),
+          enumOptions: prop.items.enum.map((v) => ({ value: v, label: toLabel(v) })),
+        };
+      } else if (Array.isArray(prop.enum)) {
+        entry['ui:widget'] = 'select';
+        entry['ui:options'] = {
+          ...(entry['ui:options'] || {}),
+          enumOptions: prop.enum.map((v) => ({ value: v, label: toLabel(v) })),
+        };
+      }
     }
   }
 
-  // Always hide 'id' in UI if present (backend generates UUID)
-  if (entitySchema.properties?.id) {
+  // Always hide 'id'
+  if (props.id) {
     ui.id = { ...(ui.id || {}), 'ui:widget': 'hidden' };
   }
+
+  // Audit fields visible but disabled
+  ['created_at', 'issued_at', 'expires_at', 'updated_at'].forEach((k) => {
+    if (props[k]) {
+      ui[k] = { ...(ui[k] || {}), 'ui:disabled': true };
+    }
+  });
+
+  const order = buildOrder(props);
+  if (order) ui['ui:order'] = order;
 
   return ui;
 }
 
-// --------------- component ---------------
-
-const SchemaForm = ({ table, role, initialData, onSaved }) => {
+const SchemaForm = ({ table, role, initialData, onSaved, open, onClose, mode = 'create' }) => {
   const [schema, setSchema] = useState({});
   const [formData, setFormData] = useState(initialData || {});
   const [errMsg, setErrMsg] = useState('');
   const [loading, setLoading] = useState(true);
-  const [snackOpen, setSnackOpen] = useState(false);
 
-  // hydrate when selection changes (edit vs create)
   useEffect(() => {
     setFormData(initialData || {});
-  }, [initialData]);
+  }, [initialData, open]);
 
-  // Load entity schema; unique $id; attach definitions; remove 'id' from required
   useEffect(() => {
+    if (!open) return;
     try {
       setLoading(true);
       setErrMsg('');
@@ -132,10 +174,8 @@ const SchemaForm = ({ table, role, initialData, onSaved }) => {
       };
 
       const schemaForCreate = removeFromRequired(base, ['id']);
-
       setSchema(schemaForCreate);
 
-      // reset/create defaults only if not editing
       if (!initialData) {
         const initialAudit = buildInitialAuditValues(tableSchema);
         setFormData(initialAudit);
@@ -147,11 +187,13 @@ const SchemaForm = ({ table, role, initialData, onSaved }) => {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [table]);
+  }, [table, open]);
 
-  const uiSchema = useMemo(() => buildUiSchema(schema, role), [schema, role]);
+  const uiSchema = useMemo(
+    () => buildUiSchema(schema, role, schemaV2.definitions),
+    [schema, role]
+  );
 
-  // Strip suppressed fields (id) before submit
   function stripSuppressedFields(data) {
     const cleaned = { ...data };
     if ('id' in cleaned) delete cleaned.id;
@@ -160,15 +202,13 @@ const SchemaForm = ({ table, role, initialData, onSaved }) => {
 
   const onSubmit = ({ formData }) => {
     const payload = stripSuppressedFields(formData);
-    const isEdit = !!initialData?.id;
+    const isEdit = mode === 'edit' && !!initialData?.id;
     const url = isEdit ? `/${table}/${initialData.id}` : `/${table}/`;
     const method = isEdit ? 'put' : 'post';
 
     api({ method, url, data: payload })
       .then((response) => {
-        console.log(`${table} saved:`, response.data);
         setFormData(response.data);
-        setSnackOpen(true);
         onSaved && onSaved(response.data);
       })
       .catch((err) => {
@@ -177,53 +217,55 @@ const SchemaForm = ({ table, role, initialData, onSaved }) => {
       });
   };
 
+  const title =
+    (mode === 'edit' ? 'Edit ' : 'Add ') +
+    (table.charAt(0).toUpperCase() + table.slice(1).replace(/_/g, ' '));
+
+  const formId = `form-${table}`;
+
   return (
-    <Box>
-      <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-        <Typography variant="h6" gutterBottom>
-          {table.charAt(0).toUpperCase() + table.slice(1)} ({role})
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+      <DialogTitle>{title}</DialogTitle>
+      <DialogContent dividers>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          {schema?.title || 'Fill out the form and save.'}
         </Typography>
-        <Typography variant="body2" color="text.secondary">
-          {schema?.title || 'Enter details and submit. Required fields are marked.'}
-        </Typography>
-      </Paper>
 
-      {!!errMsg && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          <AlertTitle>Error</AlertTitle>
-          {errMsg}
-        </Alert>
-      )}
+        {!!errMsg && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            <AlertTitle>Error</AlertTitle>
+            {errMsg}
+          </Alert>
+        )}
 
-      {loading ? (
-        <Paper variant="outlined" sx={{ p: 3, textAlign: 'center' }}>
+        {loading ? (
           <Typography>Loading schema...</Typography>
-        </Paper>
-      ) : schema && schema.properties ? (
-        <Form
-          key={table} // force remount on entity change
-          schema={schema}
-          uiSchema={uiSchema}
-          formData={formData}
-          validator={validator}
-          liveValidate
-          showErrorList={false}
-          onChange={({ formData }) => setFormData(formData)}
-          onSubmit={onSubmit}
-        />
-      ) : (
-        <Paper variant="outlined" sx={{ p: 3, textAlign: 'center' }}>
+        ) : schema && schema.properties ? (
+          <Form
+            id={formId}
+            key={table}
+            schema={schema}
+            uiSchema={uiSchema}
+            formData={formData}
+            validator={validator}
+            templates={templates}
+            widgets={{ RefSelect }}
+            liveValidate
+            showErrorList={false}
+            onChange={({ formData }) => setFormData(formData)}
+            onSubmit={onSubmit}
+          />
+        ) : (
           <Typography>No schema found for “{table}”.</Typography>
-        </Paper>
-      )}
-
-      <Snackbar
-        open={snackOpen}
-        autoHideDuration={3500}
-        onClose={() => setSnackOpen(false)}
-        message="Saved successfully"
-      />
-    </Box>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button type="submit" form={formId} variant="contained">
+          Save
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 };
 

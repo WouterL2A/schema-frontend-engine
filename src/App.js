@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import SchemaForm from './components/SchemaForm';
 import EntityList from './components/EntityList';
+import ConfirmDialog from './components/ConfirmDialog';
 import schemaV2 from './components/schema_v2.json';
 import './index.css';
 
@@ -18,10 +19,9 @@ import {
   Snackbar,
   Alert,
 } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
-import EditIcon from '@mui/icons-material/Edit';
-import DeleteIcon from '@mui/icons-material/Delete';
 import api from './api';
+
+const pretty = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ') : '');
 
 const App = () => {
   // Discover entities from schema (keys under definitions)
@@ -32,57 +32,63 @@ const App = () => {
 
   const [currentEntity, setCurrentEntity] = useState(() => entities[0] || '');
   const [role, setRole] = useState('user');
-  const [selected, setSelected] = useState(null);   // selected record (row) for editing
-  const [mode, setMode] = useState('create');       // 'create' | 'edit'
-  const [reloadKey, setReloadKey] = useState(0);    // trigger list reloads
+
+  // selection (highlight row)
+  const [selected, setSelected] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  // dialogs
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [mode, setMode] = useState('create'); // 'create' | 'edit'
+  const [pendingDelete, setPendingDelete] = useState(null);
+
   const [snack, setSnack] = useState({ open: false, message: '', severity: 'success' });
 
   const handlePickEntity = (ent) => {
     setCurrentEntity(ent);
     setSelected(null);
     setMode('create');
+    setDialogOpen(false);
     setReloadKey((k) => k + 1);
   };
 
+  // === actions wired from EntityList ===
   const handleAdd = () => {
-    setSelected(null);
     setMode('create');
+    setDialogOpen(true);
   };
 
-  const handleEdit = () => {
-    if (!selected?.id) return;
+  const handleEdit = (row) => {
+    setSelected(row);
     setMode('edit');
+    setDialogOpen(true);
   };
 
-  const handleDelete = async () => {
-    if (!selected?.id) return;
-    const ok = window.confirm(`Delete this ${currentEntity.slice(0, -1) || 'item'}?`);
-    if (!ok) return;
+  const handleAskDelete = (row) => {
+    setPendingDelete(row);
+  };
+
+  const doDelete = async () => {
+    if (!pendingDelete?.id) return;
     try {
-      await api.delete(`/${currentEntity}/${selected.id}`);
-      setSnack({ open: true, message: 'Deleted successfully', severity: 'success' });
-      setSelected(null);
-      setMode('create');
+      await api.delete(`/${currentEntity}/${pendingDelete.id}`);
+      setSnack({ open: true, message: `${pretty(currentEntity)} deleted`, severity: 'success' });
+      setPendingDelete(null);
+      if (selected?.id === pendingDelete.id) setSelected(null);
       setReloadKey((k) => k + 1);
-    } catch (e) {
-      setSnack({ open: true, message: 'Delete failed', severity: 'error' });
+    } catch {
+      setSnack({ open: true, message: `Delete failed`, severity: 'error' });
+    } finally {
+      setPendingDelete(null);
     }
   };
 
   const handleSaved = (saved) => {
-    // When a save completes, refresh the list and keep/edit selection context
     setReloadKey((k) => k + 1);
-    if (saved?.id) {
-      setSelected(saved);
-      setMode('edit');
-    } else {
-      setSelected(null);
-      setMode('create');
-    }
-    setSnack({ open: true, message: 'Saved successfully', severity: 'success' });
+    if (saved?.id) setSelected(saved);
+    setSnack({ open: true, message: `${pretty(currentEntity)} saved`, severity: 'success' });
+    setDialogOpen(false);
   };
-
-  const isRowSelected = !!selected?.id;
 
   return (
     <Container maxWidth="lg" sx={{ py: 3 }}>
@@ -127,36 +133,12 @@ const App = () => {
                   variant={currentEntity === ent ? 'contained' : 'outlined'}
                   onClick={() => handlePickEntity(ent)}
                   sx={{ textTransform: 'none' }}
-                  title={`Open ${ent} form`}
+                  title={`Open ${ent} list`}
                 >
                   {ent}
                 </Button>
               ))
             )}
-          </Stack>
-
-          {/* CRUD toolbar */}
-          <Stack direction="row" spacing={1}>
-            <Button startIcon={<AddIcon />} variant="contained" onClick={handleAdd}>
-              Add
-            </Button>
-            <Button
-              startIcon={<EditIcon />}
-              variant="outlined"
-              onClick={handleEdit}
-              disabled={!isRowSelected}
-            >
-              Edit
-            </Button>
-            <Button
-              startIcon={<DeleteIcon />}
-              variant="outlined"
-              color="error"
-              onClick={handleDelete}
-              disabled={!isRowSelected}
-            >
-              Delete
-            </Button>
           </Stack>
         </Stack>
       </Paper>
@@ -164,31 +146,17 @@ const App = () => {
       <Box>
         {currentEntity ? (
           <Grid container spacing={2}>
-            {/* Left: list of records */}
-            <Grid item xs={12} md={6}>
+            <Grid item xs={12}>
               <EntityList
                 table={currentEntity}
                 onSelect={setSelected}
                 selectedId={selected?.id}
                 reloadKey={reloadKey}
+                // new per-row + header actions:
+                onAdd={handleAdd}
+                onEdit={handleEdit}
+                onDelete={handleAskDelete}
               />
-            </Grid>
-
-            {/* Right: create/edit form */}
-            <Grid item xs={12} md={6}>
-              <Paper variant="outlined" sx={{ p: 2 }}>
-                <SchemaForm
-                  table={currentEntity}
-                  role={role}
-                  mode={mode}
-                  initialData={mode === 'edit' ? selected : null}
-                  onSaved={handleSaved}
-                  onCancel={() => {
-                    setMode('create');
-                    setSelected(null);
-                  }}
-                />
-              </Paper>
             </Grid>
           </Grid>
         ) : (
@@ -197,6 +165,28 @@ const App = () => {
           </Paper>
         )}
       </Box>
+
+      {/* Create/Edit dialog */}
+      <SchemaForm
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        table={currentEntity}
+        role={role}
+        mode={mode}
+        initialData={mode === 'edit' ? selected : null}
+        onSaved={handleSaved}
+      />
+
+      {/* Delete confirm dialog */}
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title={`Delete ${pretty(currentEntity).slice(0, -1) || 'item'}?`}
+        message={`This action cannot be undone.`}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={doDelete}
+        confirmColor="error"
+        confirmText="Delete"
+      />
 
       <Snackbar
         open={snack.open}
