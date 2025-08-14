@@ -210,6 +210,7 @@ const SchemaForm = ({ table, role, initialData, onSaved, open, onClose, mode = '
       .then((response) => {
         setFormData(response.data);
         onSaved && onSaved(response.data);
+        onClose();
       })
       .catch((err) => {
         console.error(`Error saving ${table}:`, err);
