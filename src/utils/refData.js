@@ -20,15 +20,28 @@ export async function getRefOptions(table, valueKey = 'id', labelKey = 'name') {
   const key = `${table}|${valueKey}|${labelKey}`;
   if (_cache.has(key)) return _cache.get(key);
 
-  const res = await api.get(`/${table}/`, { params: { limit: 1000, offset: 0 } });
-  const items = res?.data?.items || [];
-  const opts = items.map((it) => ({
-    value: it[valueKey],
-    label: it[labelKey] ?? it.name ?? it.email ?? it.title ?? it[valueKey],
-    raw: it,
-  }));
-  const map = new Map(opts.map((o) => [o.value, o.label]));
-  const payload = { opts, map, valueKey, labelKey };
+//  const res = await api.get(`/${table}/`, { params: { limit: 1000, offset: 0 } });
+  const res = await api.get(`/${table}/`, { params: { limit: 100, offset: 0 } });
+
+  // Handle both {items:[...]} and bare arrays just in case
+  const data = res?.data ?? res ?? {};
+  const items = Array.isArray(data.items) ? data.items : (Array.isArray(data) ? data : []);
+
+  const options = items.map((it) => {
+    const value = it?.[valueKey] ?? it?.id;
+    const label =
+      it?.[labelKey] ??
+      it?.display ??
+      it?.name ??
+      it?.email ??
+      String(value ?? '');
+    return { value, label, raw: it };
+  });
+
+  const map = new Map(options.map((o) => [o.value, o.label]));
+
+  // Return both `options` and `opts` for compatibility
+  const payload = { options, opts: options, map, valueKey, labelKey };
   _cache.set(key, payload);
   return payload;
 }

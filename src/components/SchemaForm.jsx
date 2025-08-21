@@ -1,273 +1,310 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import Form from '@rjsf/mui';
-import { customizeValidator } from '@rjsf/validator-ajv8';
-import api from '../api';
-import schemaV2 from './schema_v2.json';
-import RefSelect from './widgets/RefSelect';
-
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import {
-  Alert,
-  AlertTitle,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
-  Typography,
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  TextField, Button, Stack, MenuItem, FormControlLabel, Checkbox,
+  CircularProgress, Typography
 } from '@mui/material';
+import schemaV2 from './schema_v2.json';
+import api from '../api';
+import { getRefOptions, guessLabelKey } from '../utils/refData';
 
-import { guessLabelKey } from '../utils/refData';
+const pretty = (k) => (k ? k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, ' ') : '');
 
-const validator = customizeValidator({
-  ajvOptionsOverrides: { allErrors: true, strict: false },
-  formats: {
-    uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-  }
-});
+/** Build a light description of fields from schema */
+function buildFieldMeta(table) {
+  const def = schemaV2?.definitions?.[table] || {};
+  const props = def.properties || {};
+  const required = new Set(def.required || []);
 
-// Hide the internal RJSF submit button (we use the dialog's Save)
-const templates = { ButtonTemplates: { SubmitButton: () => null } };
+  const fields = Object.keys(props)
+    .filter((key) => {
+      const p = props[key] || {};
+      const xui = p['x-ui'] || {};
+      if (xui.hidden === true) return false;
+      if (key === 'hashed_password') return false; // example skip
+      return true;
+    })
+    .map((key) => {
+      const p = props[key] || {};
+      const type = Array.isArray(p.type) ? p.type[0] : p.type;
+      const format = p.format;
 
-function removeFromRequired(schemaObj, fields = []) {
-  const clone = JSON.parse(JSON.stringify(schemaObj));
-  if (Array.isArray(clone.required)) {
-    clone.required = clone.required.filter((r) => !fields.includes(r));
-  }
-  return clone;
-}
+      // FK detection (accept x-*, plain, or $ref)
+      let refTable = p['x-refTable'] || p.refTable || null;
+      let refColumn = p['x-refColumn'] || p.refColumn || 'id';
+      let relName = p['x-relationshipName'] || p.relationshipName || null;
 
-function buildInitialAuditValues(entitySchema) {
-  const now = new Date().toISOString();
-  const data = {};
-  const props = entitySchema?.properties || {};
-  if (props.created_at && props.created_at.type === 'string' && props.created_at.format === 'date-time') {
-    data.created_at = now;
-  }
-  if (props.issued_at && props.issued_at.type === 'string' && props.issued_at.format === 'date-time') {
-    data.issued_at = now;
-  }
-  return data;
-}
-
-function buildOrder(props) {
-  if (!props) return undefined;
-  const keys = Object.keys(props);
-  const first = ['name', 'email', 'role', 'roles'];
-  const last = ['created_at', 'issued_at', 'expires_at', 'updated_at', 'id'];
-  const middle = keys.filter((k) => !first.includes(k) && !last.includes(k));
-  return [...first.filter((k) => keys.includes(k)), ...middle, ...last.filter((k) => keys.includes(k))];
-}
-
-/** Build uiSchema: enums, widgets, FK dropdowns, audit field behavior */
-function buildUiSchema(entitySchema, role, allDefs) {
-  if (!entitySchema?.properties) return {};
-  const ui = {};
-  const props = entitySchema.properties;
-  const toLabel = (v) => String(v).charAt(0).toUpperCase() + String(v).slice(1);
-
-  for (const [field, prop] of Object.entries(props)) {
-    const xui = prop['x-ui'] || {};
-    const entry = (ui[field] = ui[field] || {});
-
-    // Hidden rules
-    if (xui.hidden === true) {
-      entry['ui:widget'] = 'hidden';
-      continue;
-    }
-    if (Array.isArray(xui.visibleRoles) && !xui.visibleRoles.includes(role)) {
-      entry['ui:widget'] = 'hidden';
-      continue;
-    }
-
-    // FK detection (refTable/refColumn or $ref)
-    if (prop.refTable || prop.$ref) {
-      const table =
-        prop.refTable ||
-        (typeof prop.$ref === 'string' && prop.$ref.includes('#/definitions/')
-          ? prop.$ref.split('#/definitions/')[1].split('/')[0]
-          : undefined);
-
-      if (table) {
-        const valueKey = prop.refColumn || 'id';
-        const labelKey = guessLabelKey(allDefs, table);
-        entry['ui:widget'] = 'RefSelect';
-        entry['ui:options'] = {
-          ...(entry['ui:options'] || {}),
-          ref: { table, value: valueKey, label: labelKey },
-        };
-      }
-    }
-
-    if (!entry['ui:widget']) {
-      if (typeof xui.widget === 'string') {
-        entry['ui:widget'] = xui.widget;
-      } else if (/password/i.test(field)) {
-        entry['ui:widget'] = 'password';
-      }
-    }
-
-    if (xui.options && typeof xui.options === 'object') {
-      entry['ui:options'] = { ...(entry['ui:options'] || {}), ...xui.options };
-    }
-
-    if (!entry['ui:widget']) {
-      if (prop.type === 'array' && prop.items && Array.isArray(prop.items.enum)) {
-        entry['ui:widget'] = 'checkboxes';
-        entry['ui:options'] = {
-          ...(entry['ui:options'] || {}),
-          enumOptions: prop.items.enum.map((v) => ({ value: v, label: toLabel(v) })),
-        };
-      } else if (Array.isArray(prop.enum)) {
-        entry['ui:widget'] = 'select';
-        entry['ui:options'] = {
-          ...(entry['ui:options'] || {}),
-          enumOptions: prop.enum.map((v) => ({ value: v, label: toLabel(v) })),
-        };
-      }
-    }
-  }
-
-  // Always hide 'id'
-  if (props.id) {
-    ui.id = { ...(ui.id || {}), 'ui:widget': 'hidden' };
-  }
-
-  // Audit fields visible but disabled
-  ['created_at', 'issued_at', 'expires_at', 'updated_at'].forEach((k) => {
-    if (props[k]) {
-      ui[k] = { ...(ui[k] || {}), 'ui:disabled': true };
-    }
-  });
-
-  const order = buildOrder(props);
-  if (order) ui['ui:order'] = order;
-
-  return ui;
-}
-
-const SchemaForm = ({ table, role, initialData, onSaved, open, onClose, mode = 'create' }) => {
-  const [schema, setSchema] = useState({});
-  const [formData, setFormData] = useState(initialData || {});
-  const [errMsg, setErrMsg] = useState('');
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    setFormData(initialData || {});
-  }, [initialData, open]);
-
-  useEffect(() => {
-    if (!open) return;
-    try {
-      setLoading(true);
-      setErrMsg('');
-
-      const tableSchema = schemaV2?.definitions?.[table];
-      if (!tableSchema) {
-        throw new Error(`Table "${table}" not found in schema_v2.json definitions`);
+      if (!refTable && typeof p.$ref === 'string' && p.$ref.includes('#/definitions/')) {
+        const after = p.$ref.split('#/definitions/')[1] || '';
+        refTable = after.split('/')[0] || null;
+        refColumn = 'id';
       }
 
-      const base = {
-        $id: `urn:schema:schema_v2/${table}`,
-        $schema: 'http://json-schema.org/draft-07/schema#',
-        ...tableSchema,
-        definitions: schemaV2.definitions,
+      // derive relKey for nested payloads (user_id -> user)
+      const relKey = relName || (key.endsWith('_id') ? key.slice(0, -3) : (refTable ? refTable.replace(/s$/, '') : null));
+
+      return {
+        key,
+        type,
+        format,
+        required: required.has(key),
+        refTable,
+        refColumn,
+        relKey,
       };
+    });
 
-      const schemaForCreate = removeFromRequired(base, ['id']);
-      setSchema(schemaForCreate);
+  // small stable ordering: id first, timestamps last
+  const preferredFirst = ['id', 'name', 'email'];
+  const preferredLast = ['created_at', 'issued_at', 'expires_at', 'updated_at', 'completed_at', 'started_at'];
+  const ordered = [
+    ...preferredFirst.filter((k) => fields.some(f => f.key === k)),
+    ...fields.map(f => f.key).filter((k) => !preferredFirst.includes(k) && !preferredLast.includes(k)),
+    ...preferredLast.filter((k) => fields.some(f => f.key === k)),
+  ];
+  const byKey = Object.fromEntries(fields.map(f => [f.key, f]));
+  return ordered.map(k => byKey[k]).filter(Boolean);
+}
 
-      if (!initialData) {
-        const initialAudit = buildInitialAuditValues(tableSchema);
-        setFormData(initialAudit);
-      }
-    } catch (e) {
-      console.error(e);
-      setErrMsg('Failed to load local schema');
-    } finally {
-      setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [table, open]);
+/** Normalize initial value: use *_id, or nested rel.id if present */
+function initialValueFor(field, initialData) {
+  const { key, relKey } = field;
+  if (!initialData) return '';
+  if (initialData[key] != null) return initialData[key];
+  if (relKey && initialData[relKey] && typeof initialData[relKey] === 'object') {
+    return initialData[relKey].id ?? '';
+  }
+  return '';
+}
 
-  const uiSchema = useMemo(
-    () => buildUiSchema(schema, role, schemaV2.definitions),
-    [schema, role]
+export default function SchemaForm({
+  open,
+  onClose,
+  table,
+  role,           // reserved for RBAC
+  mode = 'create',// 'create' | 'edit'
+  initialData,
+  onSaved,
+}) {
+  const fields = useMemo(() => buildFieldMeta(table), [table]);
+
+  // Hide PK on create (usually auto-generated)
+  const visibleFields = useMemo(
+    () => fields.filter(f => !(mode === 'create' && f.key === 'id')),
+    [fields, mode]
   );
 
-  function stripSuppressedFields(data) {
-    const cleaned = { ...data };
-    if ('id' in cleaned) delete cleaned.id;
-    return cleaned;
-  }
+  // Split FK fields
+  const fkFields = useMemo(() => fields.filter(f => !!f.refTable), [fields]);
 
-  const onSubmit = ({ formData }) => {
-    const payload = stripSuppressedFields(formData);
-    const isEdit = mode === 'edit' && !!initialData?.id;
-    const url = isEdit ? `/${table}/${initialData.id}` : `/${table}/`;
-    const method = isEdit ? 'put' : 'post';
+  // Form state
+  const [form, setForm] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [loadErr, setLoadErr] = useState('');
+  const [saveErr, setSaveErr] = useState('');
 
-    api({ method, url, data: payload })
-      .then((response) => {
-        setFormData(response.data);
-        onSaved && onSaved(response.data);
-        onClose();
-      })
-      .catch((err) => {
-        console.error(`Error saving ${table}:`, err);
-        setErrMsg('Failed to submit form');
-      });
+  // FK option maps { colKey: { options: [{value,label}], map: Map<value,label> } }
+  const [fkOptions, setFkOptions] = useState({});
+
+  // Init form on open/table/change
+  useEffect(() => {
+    if (!open) return;
+    const init = {};
+    fields.forEach((f) => {
+      init[f.key] = initialValueFor(f, initialData);
+    });
+    setForm(init);
+    setSaveErr('');
+    setLoadErr('');
+  }, [open, table, initialData, fields]);
+
+  // Load FK options
+  useEffect(() => {
+    let mounted = true;
+    async function loadAll() {
+      try {
+        const out = {};
+        for (const f of fkFields) {
+          const labelKey = guessLabelKey(schemaV2.definitions, f.refTable);
+          const { options, opts, map } = await getRefOptions(
+            f.refTable,
+            f.refColumn || 'id',
+            labelKey || 'name'
+          );
+          if (!mounted) return;
+          out[f.key] = { options: options || opts || [], map };
+        }
+        if (mounted) setFkOptions(out);
+      } catch (e) {
+        if (mounted) setLoadErr('Failed to load reference data');
+      }
+    }
+    if (open && fkFields.length) loadAll();
+    else setFkOptions({});
+    return () => { mounted = false; };
+  }, [open, fkFields]);
+
+  const setField = useCallback((key, val) => {
+    setForm((prev) => ({ ...prev, [key]: val }));
+  }, []);
+
+  const handleSubmit = async () => {
+    setSaving(true);
+    setSaveErr('');
+    try {
+      // Build payload; drop empty strings and read-onlys
+      const payload = {};
+      for (const f of fields) {
+        if (mode === 'create' && f.key === 'id') continue; // don’t send id on create
+        const v = form[f.key];
+        if (v === '' || v === undefined) continue;
+        payload[f.key] = typeof v === 'string' ? v.trim() : v;
+      }
+
+      let saved;
+      if (mode === 'create') {
+        saved = await api.post(`/${table}/`, payload);
+      } else {
+        const id = initialData?.id ?? form.id;
+        if (!id) throw new Error('Missing id for update');
+        saved = await api.put(`/${table}/${id}`, payload);
+      }
+
+      const data = saved?.data ?? saved;
+      onSaved?.(data);
+      onClose?.();
+    } catch (e) {
+      setSaveErr(e?.message || 'Save failed');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const title =
-    (mode === 'edit' ? 'Edit ' : 'Add ') +
-    (table.charAt(0).toUpperCase() + table.slice(1).replace(/_/g, ' '));
+  // Render one field
+  const renderField = (f) => {
+    const value = form[f.key] ?? '';
+    const commonProps = {
+      label: pretty(f.key),
+      fullWidth: true,
+      size: 'small',
+      margin: 'dense',
+      value,
+      onChange: (e) => setField(f.key, e.target.value),
+      required: f.required && (mode === 'create' || f.key !== 'id'),
+    };
 
-  const formId = `form-${table}`;
+    // Read-only heuristics
+    const readOnly =
+      (f.key === 'id' && mode === 'edit') ||
+      ['created_at', 'updated_at', 'completed_at', 'started_at', 'issued_at', 'expires_at'].includes(f.key);
+
+    // FK select
+    if (f.refTable) {
+      const opts = fkOptions[f.key]?.options || [];
+      return (
+        <TextField
+          key={f.key}
+          {...commonProps}
+          select
+          disabled={readOnly || saving}
+          helperText={readOnly ? 'Read only' : ''}
+        >
+          {opts.map((opt) => (
+            <MenuItem key={String(opt.value)} value={opt.value}>
+              {opt.label}
+            </MenuItem>
+          ))}
+        </TextField>
+      );
+    }
+
+    // booleans → checkbox
+    if (f.type === 'boolean') {
+      return (
+        <FormControlLabel
+          key={f.key}
+          control={
+            <Checkbox
+              size="small"
+              checked={!!value}
+              onChange={(e) => setField(f.key, e.target.checked)}
+              disabled={readOnly || saving}
+            />
+          }
+          label={pretty(f.key)}
+        />
+      );
+    }
+
+    // datetime
+    if (f.format === 'date-time') {
+      return (
+        <TextField
+          key={f.key}
+          {...commonProps}
+          type="datetime-local"
+          disabled={readOnly || saving}
+          InputLabelProps={{ shrink: true }}
+        />
+      );
+    }
+
+    // email
+    if (f.format === 'email') {
+      return (
+        <TextField
+          key={f.key}
+          {...commonProps}
+          type="email"
+          disabled={readOnly || saving}
+        />
+      );
+    }
+
+    // integer/number
+    if (f.type === 'integer' || f.type === 'number') {
+      return (
+        <TextField
+          key={f.key}
+          {...commonProps}
+          type="number"
+          disabled={readOnly || saving}
+        />
+      );
+    }
+
+    // default: text
+    return (
+      <TextField
+        key={f.key}
+        {...commonProps}
+        disabled={readOnly || saving}
+      />
+    );
+  };
 
   return (
-    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>{title}</DialogTitle>
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>
+        {mode === 'create' ? `Add ${pretty(table).slice(0, -1)}` : `Edit ${pretty(table).slice(0, -1)}`}
+      </DialogTitle>
       <DialogContent dividers>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          {schema?.title || 'Fill out the form and save.'}
-        </Typography>
-
-        {!!errMsg && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            <AlertTitle>Error</AlertTitle>
-            {errMsg}
-          </Alert>
-        )}
-
-        {loading ? (
-          <Typography>Loading schema...</Typography>
-        ) : schema && schema.properties ? (
-          <Form
-            id={formId}
-            key={table}
-            schema={schema}
-            uiSchema={uiSchema}
-            formData={formData}
-            validator={validator}
-            templates={templates}
-            widgets={{ RefSelect }}
-            liveValidate
-            showErrorList={false}
-            onChange={({ formData }) => setFormData(formData)}
-            onSubmit={onSubmit}
-          />
-        ) : (
-          <Typography>No schema found for “{table}”.</Typography>
+        {loadErr && <Typography color="error" sx={{ mb: 1 }}>{loadErr}</Typography>}
+        <Stack spacing={1}>
+          {visibleFields.map(renderField)}
+        </Stack>
+        {saveErr && (
+          <Typography color="error" sx={{ mt: 1 }}>
+            {saveErr}
+          </Typography>
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button type="submit" form={formId} variant="contained">
-          Save
+        <Button onClick={onClose} disabled={saving}>Cancel</Button>
+        <Button variant="contained" onClick={handleSubmit} disabled={saving}>
+          {saving ? <CircularProgress size={18} /> : (mode === 'create' ? 'Create' : 'Save')}
         </Button>
       </DialogActions>
     </Dialog>
   );
-};
-
-export default SchemaForm;
+}
