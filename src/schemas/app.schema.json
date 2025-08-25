@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/schemas/app.schema.json",
+  "title": "App Schema",
+  "type": "object",
+  "additionalProperties": false,
+
+  "x-ui": {
+    "navigation": { "style": "accordion" },
+    "groups": [
+      {
+        "id": "workflow",
+        "label": "Workflow",
+        "order": 10,
+        "entities": [
+          "process_definition",
+          "workflow_state",
+          "workflow_transition",
+          "task_definition"
+        ]
+      },
+      {
+        "id": "auth",
+        "label": "Auth",
+        "order": 20,
+        "entities": ["roles", "users", "user_roles", "sessions"]
+      },
+      {
+        "id": "forms",
+        "label": "Forms",
+        "order": 30,
+        "entities": ["form_definition", "task_field_behavior", "form_entry"]
+      },
+      {
+        "id": "crm",
+        "label": "CRM",
+        "order": 40,
+        "entities": ["legal_entity_type", "legal_entity", "document_upload", "process_instance", "task_instance", "task_user_access"]
+      }
+    ]
+  },
+
+  "properties": {
+    "auth":   { "$ref": "https://example.com/schemas/auth.schema.json" },
+    "crm":    { "$ref": "https://example.com/schemas/crm.schema.json"  },
+    "forms":  { "$ref": "https://example.com/schemas/form.schema.json" },
+    "process":{ "$ref": "https://example.com/schemas/process.schema.json" }
+  },
+  "required": ["auth", "crm", "forms", "process"]
+}

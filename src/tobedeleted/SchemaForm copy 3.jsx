@@ -2,8 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Form from '@rjsf/mui';
 import { customizeValidator } from '@rjsf/validator-ajv8';
 import api from '../api';
-import schemaV2 from './schema_v2.json';
-import RefSelect from './widgets/RefSelect';
+import schemaV2 from '../components/schema_v2.json';
+import RefSelect from '../components/widgets/RefSelect';
 
 import {
   Alert,

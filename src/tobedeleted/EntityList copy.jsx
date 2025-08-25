@@ -9,7 +9,7 @@ import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 
-import schemaV2 from './schema_v2.json';
+import schemaV2 from '../components/schema_v2.json';
 import api from '../api';
 import { getRefOptions, guessLabelKey } from '../utils/refData';
 

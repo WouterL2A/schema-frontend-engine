@@ -1,59 +1,39 @@
+// src/App.js
 import React, { useMemo, useState } from 'react';
 import SchemaForm from './components/SchemaForm';
 import EntityList from './components/EntityList';
 import ConfirmDialog from './components/ConfirmDialog';
-import schemaV2 from './components/schema_v2.json';
+import SchemaNavigation from './components/SchemaNavigation';
 import './index.css';
 
 import {
-  Box,
   Container,
-  Typography,
-  ToggleButton,
-  ToggleButtonGroup,
   Paper,
   Stack,
   Button,
-  Divider,
-  Grid,
   Snackbar,
   Alert,
 } from '@mui/material';
+
 import api from './api';
+import { getGroups, entityTitle } from './schemaRegistry';
 
-const pretty = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ') : '');
+export default function App() {
+  const groups = useMemo(() => getGroups(), []);
+  const initialEntity = useMemo(() => groups?.[0]?.entities?.[0] || '', [groups]);
 
-const App = () => {
-  // Discover entities from schema (keys under definitions)
-  const entities = useMemo(() => {
-    const defs = schemaV2?.definitions || {};
-    return Object.keys(defs);
-  }, []);
-
-  const [currentEntity, setCurrentEntity] = useState(() => entities[0] || '');
-  const [role, setRole] = useState('user');
-
-  // selection (highlight row)
+  const [currentEntity, setCurrentEntity] = useState(initialEntity);
   const [selected, setSelected] = useState(null);
-  const [reloadKey, setReloadKey] = useState(0);
-
-  // dialogs
   const [dialogOpen, setDialogOpen] = useState(false);
   const [mode, setMode] = useState('create'); // 'create' | 'edit'
   const [pendingDelete, setPendingDelete] = useState(null);
-
+  const [reloadKey, setReloadKey] = useState(0);
   const [snack, setSnack] = useState({ open: false, message: '', severity: 'success' });
 
-  const handlePickEntity = (ent) => {
-    setCurrentEntity(ent);
-    setSelected(null);
-    setMode('create');
-    setDialogOpen(false);
-    setReloadKey((k) => k + 1);
-  };
+  const title = useMemo(() => entityTitle(currentEntity), [currentEntity]);
 
-  // === actions wired from EntityList ===
   const handleAdd = () => {
+    setSelected(null);
     setMode('create');
     setDialogOpen(true);
   };
@@ -72,116 +52,59 @@ const App = () => {
     if (!pendingDelete?.id) return;
     try {
       await api.delete(`/${currentEntity}/${pendingDelete.id}`);
-      setSnack({ open: true, message: `${pretty(currentEntity)} deleted`, severity: 'success' });
+      setSnack({ open: true, message: `${title} deleted`, severity: 'success' });
       setPendingDelete(null);
-      if (selected?.id === pendingDelete.id) setSelected(null);
       setReloadKey((k) => k + 1);
-    } catch {
-      setSnack({ open: true, message: `Delete failed`, severity: 'error' });
-    } finally {
-      setPendingDelete(null);
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err.message || 'Delete failed';
+      setSnack({ open: true, message: msg, severity: 'error' });
     }
   };
 
-  const handleSaved = (saved) => {
-    setReloadKey((k) => k + 1);
-    if (saved?.id) setSelected(saved);
-    setSnack({ open: true, message: `${pretty(currentEntity)} saved`, severity: 'success' });
+  const onSaved = () => {
     setDialogOpen(false);
+    setSelected(null);
+    setSnack({ open: true, message: `${title} ${mode === 'create' ? 'created' : 'saved'}`, severity: 'success' });
+    setReloadKey((k) => k + 1);
   };
 
   return (
     <Container maxWidth="lg" sx={{ py: 3 }}>
-      <Typography variant="h4" align="center" gutterBottom>
-        Schema Frontend Engine Demo
-      </Typography>
+      {/* Navigation (breadcrumbs + group/entity selectors) */}
+      <SchemaNavigation currentEntity={currentEntity} onChangeEntity={setCurrentEntity} />
 
-      <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-        <Stack
-          direction={{ xs: 'column', md: 'row' }}
-          spacing={2}
-          alignItems="center"
-          justifyContent="space-between"
-        >
-          {/* Role toggle */}
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Typography variant="subtitle1">Role:</Typography>
-            <ToggleButtonGroup
-              value={role}
-              exclusive
-              onChange={(_, v) => v && setRole(v)}
-              size="small"
-              color="primary"
-            >
-              <ToggleButton value="user">User</ToggleButton>
-              <ToggleButton value="admin">Admin</ToggleButton>
-            </ToggleButtonGroup>
-          </Stack>
-
-          <Divider flexItem sx={{ display: { xs: 'block', md: 'none' }, my: 1 }} />
-
-          {/* Entity buttons discovered from schema */}
-          <Stack direction="row" spacing={1} flexWrap="wrap">
-            {entities.length === 0 ? (
-              <Typography variant="body2" color="text.secondary">
-                No entities found in schema_v2.json
-              </Typography>
-            ) : (
-              entities.map((ent) => (
-                <Button
-                  key={ent}
-                  variant={currentEntity === ent ? 'contained' : 'outlined'}
-                  onClick={() => handlePickEntity(ent)}
-                  sx={{ textTransform: 'none' }}
-                  title={`Open ${ent} list`}
-                >
-                  {ent}
-                </Button>
-              ))
-            )}
-          </Stack>
+      {/* List + actions */}
+      <Paper sx={{ p: 2, mb: 2 }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
+          <strong>{title}</strong>
+          <Button variant="contained" onClick={handleAdd}>Add</Button>
         </Stack>
+        <EntityList
+          table={currentEntity}
+          onSelect={() => {}}
+          selectedId={selected?.id}
+          reloadKey={reloadKey}
+          onAdd={handleAdd}
+          onEdit={handleEdit}
+          onDelete={handleAskDelete}
+        />
       </Paper>
 
-      <Box>
-        {currentEntity ? (
-          <Grid container spacing={2}>
-            <Grid item xs={12}>
-              <EntityList
-                table={currentEntity}
-                onSelect={setSelected}
-                selectedId={selected?.id}
-                reloadKey={reloadKey}
-                // new per-row + header actions:
-                onAdd={handleAdd}
-                onEdit={handleEdit}
-                onDelete={handleAskDelete}
-              />
-            </Grid>
-          </Grid>
-        ) : (
-          <Paper variant="outlined" sx={{ p: 3, textAlign: 'center' }}>
-            <Typography>Select an entity above to get started.</Typography>
-          </Paper>
-        )}
-      </Box>
-
-      {/* Create/Edit dialog */}
+      {/* Create/Edit form */}
       <SchemaForm
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         table={currentEntity}
-        role={role}
         mode={mode}
-        initialData={mode === 'edit' ? selected : null}
-        onSaved={handleSaved}
+        initialData={selected || {}}
+        onSaved={onSaved}
       />
 
-      {/* Delete confirm dialog */}
+      {/* Confirm delete */}
       <ConfirmDialog
         open={!!pendingDelete}
-        title={`Delete ${pretty(currentEntity).slice(0, -1) || 'item'}?`}
-        message={`This action cannot be undone.`}
+        title={`Delete ${title}`}
+        message={`Are you sure you want to delete this ${title.slice(0, -1) || 'item'}? This cannot be undone.`}
         onCancel={() => setPendingDelete(null)}
         onConfirm={doDelete}
         confirmColor="error"
@@ -190,8 +113,9 @@ const App = () => {
 
       <Snackbar
         open={snack.open}
-        autoHideDuration={3500}
+        autoHideDuration={4000}
         onClose={() => setSnack((s) => ({ ...s, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
         <Alert
           severity={snack.severity}
@@ -203,6 +127,4 @@ const App = () => {
       </Snackbar>
     </Container>
   );
-};
-
-export default App;
+}

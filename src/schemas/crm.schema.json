@@ -1,0 +1,350 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/schemas/auth.schema.json",
+  "title": "Auth Model",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "users": { "$ref": "#/definitions/user" },
+    "roles": { "type": "array", "items": { "$ref": "#/definitions/role" } }
+  },
+  "definitions": {
+    "legal_entity_type": {
+      "type": "object",
+      "title": "LegalEntityType",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Primary key"
+        },
+        "name": {
+          "type": "string",
+          "description": "Type name",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional description"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "default": "now()"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_by": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "legal_entity": {
+      "type": "object",
+      "title": "LegalEntity",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type_id": {
+          "type": "string",
+          "format": "uuid",
+          "$ref": "#/definitions/legal_entity_type/properties/id",
+          "refTable": "legal_entity_type",
+          "refColumn": "id",
+          "relationshipName": "type",
+          "description": "FK to legal_entity_type.id"
+        },
+        "email": {
+          "type": "string"
+        },
+        "phone_number": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "default": "now()"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_by": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "type_id"
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "document_upload": {
+      "type": "object",
+      "title": "DocumentUpload",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "form_entry_id": {
+          "type": "string",
+          "format": "uuid",
+          "$ref": "#/definitions/form_entry/properties/id",
+          "refTable": "form_entry",
+          "refColumn": "id",
+          "relationshipName": "form_entry",
+          "description": "FK to form_entry.id"
+        },
+        "field_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "storage_type": {
+          "type": "string",
+          "enum": [
+            "local",
+            "sharepoint",
+            "onedrive"
+          ]
+        },
+        "storage_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "uploaded_at": {
+          "type": "string",
+          "format": "date-time",
+          "default": "now()"
+        },
+        "uploaded_by": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "default": "now()"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_by": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "form_entry_id",
+        "field_name",
+        "storage_type",
+        "storage_path"
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "process_instance": {
+      "type": "object",
+      "title": "ProcessInstance",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "definition_id": {
+          "type": "string",
+          "format": "uuid",
+          "$ref": "#/definitions/process_definition/properties/id",
+          "refTable": "process_definition",
+          "refColumn": "id",
+          "relationshipName": "definition",
+          "description": "FK to process_definition.id"
+        },
+        "legal_entity_id": {
+          "type": "string",
+          "format": "uuid",
+          "$ref": "#/definitions/legal_entity/properties/id",
+          "refTable": "legal_entity",
+          "refColumn": "id",
+          "relationshipName": "legal_entity",
+          "description": "FK to legal_entity.id"
+        },
+        "current_state_id": {
+          "type": "string",
+          "format": "uuid",
+          "$ref": "#/definitions/workflow_state/properties/id",
+          "refTable": "workflow_state",
+          "refColumn": "id",
+          "relationshipName": "current_state",
+          "description": "Optional FK to workflow_state.id"
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time",
+          "default": "now()"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_by": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "definition_id",
+        "legal_entity_id"
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "task_instance": {
+      "type": "object",
+      "title": "TaskInstance",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "task_definition_id": {
+          "type": "string",
+          "format": "uuid",
+          "$ref": "#/definitions/task_definition/properties/id",
+          "refTable": "task_definition",
+          "refColumn": "id",
+          "relationshipName": "task_definition",
+          "description": "FK to task_definition.id"
+        },
+        "process_instance_id": {
+          "type": "string",
+          "format": "uuid",
+          "$ref": "#/definitions/process_instance/properties/id",
+          "refTable": "process_instance",
+          "refColumn": "id",
+          "relationshipName": "process_instance",
+          "description": "FK to process_instance.id"
+        },
+        "status": {
+          "type": "string",
+          "default": "pending"
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "default": "now()"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_by": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "task_definition_id",
+        "process_instance_id"
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "task_user_access": {
+      "type": "object",
+      "title": "TaskUserAccess",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "task_instance_id": {
+          "type": "string",
+          "format": "uuid",
+          "$ref": "#/definitions/task_instance/properties/id",
+          "refTable": "task_instance",
+          "refColumn": "id",
+          "relationshipName": "task_instance",
+          "description": "FK to task_instance.id"
+        },
+        "user_id": {
+          "type": "string",
+          "description": "User identifier (TEXT in DDL; not linked to users.id here)"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "default": "now()"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_by": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "task_instance_id",
+        "user_id"
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

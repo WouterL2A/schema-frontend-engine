@@ -4,7 +4,7 @@ import validator from '@rjsf/validator-ajv8';
 import axios from 'axios';
 
 // ⬇️ Import the local JSON (path is relative to THIS file)
-import schemaV2 from './schema_v2.json';
+import schemaV2 from '../components/schema_v2.json';
 
 const SchemaForm = ({ table, role }) => {
   const [schema, setSchema] = useState({});

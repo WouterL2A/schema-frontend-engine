@@ -1,0 +1,209 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/schemas/process.schema.json",
+  "title": "Process Model",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "definitions": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/process_definition" }
+    },
+    "instances": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/process_instance" }
+    }
+  },
+  "definitions": {
+    "process_definition": {
+      "type": "object",
+      "title": "ProcessDefinition",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "default": "now()"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_by": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "workflow_state": {
+      "type": "object",
+      "title": "WorkflowState",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "default": "now()"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_by": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "workflow_transition": {
+      "type": "object",
+      "title": "WorkflowTransition",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "from_state_id": {
+          "type": "string",
+          "format": "uuid",
+          "$ref": "#/definitions/workflow_state/properties/id",
+          "refTable": "workflow_state",
+          "refColumn": "id",
+          "relationshipName": "from_state",
+          "description": "FK to workflow_state.id (from)"
+        },
+        "to_state_id": {
+          "type": "string",
+          "format": "uuid",
+          "$ref": "#/definitions/workflow_state/properties/id",
+          "refTable": "workflow_state",
+          "refColumn": "id",
+          "relationshipName": "to_state",
+          "description": "FK to workflow_state.id (to)"
+        },
+        "condition": {
+          "type": "string",
+          "description": "Optional condition expression"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "default": "now()"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_by": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "from_state_id",
+        "to_state_id"
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "task_definition": {
+      "type": "object",
+      "title": "TaskDefinition",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "process_definition_id": {
+          "type": "string",
+          "format": "uuid",
+          "$ref": "#/definitions/process_definition/properties/id",
+          "refTable": "process_definition",
+          "refColumn": "id",
+          "relationshipName": "process_definition",
+          "description": "FK to process_definition.id"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string"
+        },
+        "order": {
+          "type": "integer",
+          "description": "Execution order within the process"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "default": "now()"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_by": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "process_definition_id",
+        "name"
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
